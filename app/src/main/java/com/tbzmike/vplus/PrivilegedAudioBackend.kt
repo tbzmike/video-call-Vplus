@@ -1,16 +1,28 @@
 package com.tbzmike.vplus
 
+import android.content.Context
 import android.os.Build
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import rikka.shizuku.Shizuku
 
-/** Optional root/Shizuku execution layer. It reports failures instead of pretending to bypass audio policy. */
-class PrivilegedAudioBackend {
+/**
+ * Privileged audio layer. Root can execute the bundled TinyALSA helper from
+ * nativeLibraryDir, while Shizuku remains available for platform stream volume.
+ * Hardware controls are discovered at runtime; no device-specific mixer names
+ * or ranges are hard-coded.
+ */
+class PrivilegedAudioBackend(private val context: Context) {
     enum class Mode { NONE, ROOT, SHIZUKU }
 
     var mode: Mode = Mode.NONE
         private set
+
+    var lastHardwareStatus: String = "Hardware mixer not scanned"
+        private set
+
+    private val snapshotFile: String
+        get() = "${context.filesDir.absolutePath}/vplus-mixer.snapshot"
 
     fun detect(): Mode {
         if (hasRoot()) {
@@ -23,17 +35,45 @@ class PrivilegedAudioBackend {
 
     fun isAvailable(): Boolean = detect() != Mode.NONE
 
-    /** Raise both common voice-call and media streams to their platform maximum. */
-    fun maximizeCallVolume(): Boolean {
-        val voice = runPrivileged("cmd media_session volume --stream 0 --set 100").first
-        val media = runPrivileged("cmd media_session volume --stream 3 --set 100").first
-        return voice || media
+    /** Discover the real RX mixer controls without changing anything. */
+    fun scanHardwareMixer(): Pair<Boolean, String> {
+        if (detect() != Mode.ROOT) return false to "Root is required for direct ALSA mixer access"
+        val result = runRoot("$toolPath scan")
+        lastHardwareStatus = result.second
+        return result
+    }
+
+    /**
+     * Raise Android stream volume and, when root is available, apply the
+     * conservative hardware RX boost to controls discovered by the helper.
+     */
+    fun maximizeCallVolume(percent: Int = 200): Pair<Boolean, String> {
+        val p = percent.coerceIn(100, 200)
+        val voice = runPrivileged("cmd media_session volume --stream 0 --set 100")
+        val media = runPrivileged("cmd media_session volume --stream 3 --set 100")
+
+        if (detect() != Mode.ROOT) {
+            return (voice.first || media.first) to listOf(voice.second, media.second).filter { it.isNotBlank() }.joinToString("\n")
+        }
+
+        val snapshot = runRoot("$toolPath snapshot > ${shellQuote(snapshotFile)}")
+        if (!snapshot.first) return false to "Hardware snapshot failed: ${snapshot.second}"
+
+        val hardware = runRoot("$toolPath boost $p")
+        lastHardwareStatus = hardware.second
+        return hardware.first to listOf(voice.second, media.second, hardware.second).filter { it.isNotBlank() }.joinToString("\n")
+    }
+
+    /** Restore every mixer value captured immediately before hardware boost. */
+    fun restoreHardwareMixer(): Pair<Boolean, String> {
+        if (detect() != Mode.ROOT) return false to "Root is required to restore the hardware mixer"
+        return runRoot("$toolPath restore ${shellQuote(snapshotFile)}")
     }
 
     fun runPrivileged(command: String): Pair<Boolean, String> {
         return try {
             when (detect()) {
-                Mode.ROOT -> runProcess(arrayOf("su", "-c", command))
+                Mode.ROOT -> runRoot(command)
                 Mode.SHIZUKU -> {
                     if (!hasShizukuPermission()) return false to "Shizuku permission not granted"
                     val process = Shizuku.newProcess(arrayOf("sh", "-c", command), null, null)
@@ -48,11 +88,22 @@ class PrivilegedAudioBackend {
         }
     }
 
+    private val toolPath: String
+        get() = "${context.applicationInfo.nativeLibraryDir}/libvplus_mixer_tool.so"
+
+    private fun runRoot(command: String): Pair<Boolean, String> = runProcess(arrayOf("su", "-c", command))
+
+    private fun shellQuote(value: String): String = "'" + value.replace("'", "'\\''") + "'"
+
     private fun runProcess(command: Array<String>): Pair<Boolean, String> {
-        val process = Runtime.getRuntime().exec(command)
-        val output = BufferedReader(InputStreamReader(process.inputStream)).use { it.readText() }
-        val error = BufferedReader(InputStreamReader(process.errorStream)).use { it.readText() }
-        return (process.waitFor() == 0) to (output + error).trim()
+        return try {
+            val process = Runtime.getRuntime().exec(command)
+            val output = BufferedReader(InputStreamReader(process.inputStream)).use { it.readText() }
+            val error = BufferedReader(InputStreamReader(process.errorStream)).use { it.readText() }
+            (process.waitFor() == 0) to (output + error).trim()
+        } catch (t: Throwable) {
+            false to (t.message ?: t.javaClass.simpleName)
+        }
     }
 
     private fun hasRoot(): Boolean = try {
