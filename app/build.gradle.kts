@@ -11,8 +11,8 @@ android {
         applicationId = "com.tbzmike.vplus"
         minSdk = 23
         targetSdk = 37
-        versionCode = 4
-        versionName = "1.0.3"
+        versionCode = 5
+        versionName = "1.0.4"
 
         externalNativeBuild {
             cmake {
