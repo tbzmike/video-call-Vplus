@@ -11,8 +11,24 @@ android {
         applicationId = "com.tbzmike.vplus"
         minSdk = 23
         targetSdk = 37
-        versionCode = 3
-        versionName = "1.0.2"
+        versionCode = 4
+        versionName = "1.0.3"
+
+        externalNativeBuild {
+            cmake {
+                cppFlags += "-std=c++17 -fvisibility=hidden"
+            }
+        }
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64")
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     buildFeatures {
