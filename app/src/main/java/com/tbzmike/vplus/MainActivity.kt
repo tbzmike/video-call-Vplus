@@ -15,6 +15,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -22,6 +23,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 
 class MainActivity : ComponentActivity() {
@@ -33,21 +35,29 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-@androidx.compose.runtime.Composable
+@Composable
 private fun VplusScreen() {
+    val context = LocalContext.current
     val engine = remember { AudioBoostEngine() }
-    val privileged = remember { PrivilegedAudioBackend() }
+    val privileged = remember { PrivilegedAudioBackend(context.applicationContext) }
     var boost by remember { mutableFloatStateOf(100f) }
     var enabled by remember { mutableStateOf(false) }
     var clarity by remember { mutableStateOf(true) }
     var available by remember { mutableStateOf(false) }
     var privilegedMode by remember { mutableStateOf(PrivilegedAudioBackend.Mode.NONE) }
+    var hardwareStatus by remember { mutableStateOf("Not scanned") }
 
     DisposableEffect(Unit) {
         available = engine.initialize()
         privilegedMode = privileged.detect()
-        if (privilegedMode != PrivilegedAudioBackend.Mode.NONE) privileged.maximizeCallVolume()
-        onDispose { engine.release() }
+        if (privilegedMode == PrivilegedAudioBackend.Mode.ROOT) {
+            hardwareStatus = privileged.scanHardwareMixer().second
+            privileged.maximizeCallVolume(100)
+        }
+        onDispose {
+            if (enabled && privilegedMode == PrivilegedAudioBackend.Mode.ROOT) privileged.restoreHardwareMixer()
+            engine.release()
+        }
     }
 
     Column(
@@ -55,7 +65,7 @@ private fun VplusScreen() {
         verticalArrangement = Arrangement.spacedBy(18.dp)
     ) {
         Text("Video Call Vplus", style = MaterialTheme.typography.headlineMedium)
-        Text("Aggressive voice-volume enhancement with optional privileged audio access")
+        Text("Layered voice-volume enhancement with root/Shizuku support")
 
         Card(modifier = Modifier.fillMaxWidth()) {
             Column(modifier = Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -65,28 +75,51 @@ private fun VplusScreen() {
                     onValueChange = {
                         boost = it
                         engine.setBoostPercent(it.toInt())
+                        if (enabled && privilegedMode == PrivilegedAudioBackend.Mode.ROOT) {
+                            privileged.maximizeCallVolume(it.toInt())
+                        }
                     },
                     valueRange = 100f..200f,
                     steps = 19,
-                    enabled = available
+                    enabled = available || privilegedMode != PrivilegedAudioBackend.Mode.NONE
                 )
-                Text("100% = normal • 200% = maximum Vplus DSP target")
+                Text("100% = normal • 200% = maximum Vplus target")
             }
         }
 
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Column(modifier = Modifier.weight(1f)) {
                 Text("Vplus active", style = MaterialTheme.typography.titleMedium)
-                Text(if (available) "Audio effect path available" else "System audio effect path unavailable")
+                Text(
+                    when {
+                        privilegedMode == PrivilegedAudioBackend.Mode.ROOT -> "Root hardware path available"
+                        available -> "Android DSP path available"
+                        else -> "No usable audio backend detected"
+                    }
+                )
             }
             Switch(
                 checked = enabled,
                 onCheckedChange = {
                     enabled = it
-                    engine.setEnabled(it)
-                    if (it) privileged.maximizeCallVolume()
+                    if (it) {
+                        engine.setBoostPercent(boost.toInt())
+                        engine.setVoiceClarity(clarity)
+                        engine.setEnabled(true)
+                        if (privilegedMode == PrivilegedAudioBackend.Mode.ROOT) {
+                            val result = privileged.maximizeCallVolume(boost.toInt())
+                            hardwareStatus = result.second
+                        } else if (privilegedMode == PrivilegedAudioBackend.Mode.SHIZUKU) {
+                            privileged.maximizeCallVolume(boost.toInt())
+                        }
+                    } else {
+                        engine.setEnabled(false)
+                        if (privilegedMode == PrivilegedAudioBackend.Mode.ROOT) {
+                            hardwareStatus = privileged.restoreHardwareMixer().second
+                        }
+                    }
                 },
-                enabled = available
+                enabled = available || privilegedMode != PrivilegedAudioBackend.Mode.NONE
             )
         }
 
@@ -110,11 +143,12 @@ private fun VplusScreen() {
                 Text("Privileged audio layer", style = MaterialTheme.typography.titleMedium)
                 Text(
                     when (privilegedMode) {
-                        PrivilegedAudioBackend.Mode.ROOT -> "Root available — privileged volume path enabled"
-                        PrivilegedAudioBackend.Mode.SHIZUKU -> "Shizuku available — privileged shell path enabled"
+                        PrivilegedAudioBackend.Mode.ROOT -> "Root available — direct ALSA/TinyALSA path enabled"
+                        PrivilegedAudioBackend.Mode.SHIZUKU -> "Shizuku available — platform volume path enabled"
                         PrivilegedAudioBackend.Mode.NONE -> "Root/Shizuku not available — public Android path only"
                     }
                 )
+                Text("Hardware scan: $hardwareStatus", style = MaterialTheme.typography.bodySmall)
             }
         }
 
@@ -125,14 +159,19 @@ private fun VplusScreen() {
                 engine.setVoiceClarity(clarity)
                 engine.setEnabled(enabled)
                 privilegedMode = privileged.detect()
-                if (privilegedMode != PrivilegedAudioBackend.Mode.NONE) privileged.maximizeCallVolume()
+                hardwareStatus = if (privilegedMode == PrivilegedAudioBackend.Mode.ROOT) {
+                    privileged.scanHardwareMixer().second
+                } else "Root unavailable"
+                if (enabled && privilegedMode != PrivilegedAudioBackend.Mode.NONE) {
+                    privileged.maximizeCallVolume(boost.toInt())
+                }
             },
             modifier = Modifier.fillMaxWidth()
-        ) { Text("Re-detect and force maximum call path") }
+        ) { Text("Re-detect audio backends") }
 
         Text(
-            "Distortion protection: the boost is bounded and speech EQ is conservative. " +
-                "The privileged layer first maximizes the Android voice/media stream; DSP gain then provides additional amplification where the device permits the effect session.",
+            "Hardware controls are discovered from the phone at runtime. Vplus does not assume Qualcomm mixer names or ranges. " +
+                "The hardware boost is deliberately conservative and can restore the captured mixer values.",
             style = MaterialTheme.typography.bodySmall
         )
     }
