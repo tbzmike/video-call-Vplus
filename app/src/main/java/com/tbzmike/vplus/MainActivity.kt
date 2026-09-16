@@ -52,7 +52,6 @@ private fun VplusScreen() {
         privilegedMode = privileged.detect()
         if (privilegedMode == PrivilegedAudioBackend.Mode.ROOT) {
             hardwareStatus = privileged.scanHardwareMixer().second
-            privileged.maximizeCallVolume(100)
         }
         onDispose {
             if (enabled && privilegedMode == PrivilegedAudioBackend.Mode.ROOT) privileged.restoreHardwareMixer()
@@ -76,7 +75,7 @@ private fun VplusScreen() {
                         boost = it
                         engine.setBoostPercent(it.toInt())
                         if (enabled && privilegedMode == PrivilegedAudioBackend.Mode.ROOT) {
-                            privileged.maximizeCallVolume(it.toInt())
+                            hardwareStatus = privileged.setHardwareBoost(it.toInt()).second
                         }
                     },
                     valueRange = 100f..200f,
