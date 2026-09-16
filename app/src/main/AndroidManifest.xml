@@ -6,7 +6,6 @@
 
     <application
         android:allowBackup="true"
-        android:extractNativeLibs="true"
         android:label="Video Call Vplus"
         android:supportsRtl="true"
         android:theme="@style/Theme.VideoCallVplus">
