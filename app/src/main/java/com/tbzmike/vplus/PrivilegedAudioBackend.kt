@@ -43,10 +43,7 @@ class PrivilegedAudioBackend(private val context: Context) {
         return result
     }
 
-    /**
-     * Raise Android stream volume and, when root is available, apply the
-     * conservative hardware RX boost to controls discovered by the helper.
-     */
+    /** Capture the original controls once, then apply the requested boost. */
     fun maximizeCallVolume(percent: Int = 200): Pair<Boolean, String> {
         val p = percent.coerceIn(100, 200)
         val voice = runPrivileged("cmd media_session volume --stream 0 --set 100")
@@ -59,9 +56,16 @@ class PrivilegedAudioBackend(private val context: Context) {
         val snapshot = runRoot("$toolPath snapshot > ${shellQuote(snapshotFile)}")
         if (!snapshot.first) return false to "Hardware snapshot failed: ${snapshot.second}"
 
-        val hardware = runRoot("$toolPath boost $p")
-        lastHardwareStatus = hardware.second
+        val hardware = setHardwareBoost(p)
         return hardware.first to listOf(voice.second, media.second, hardware.second).filter { it.isNotBlank() }.joinToString("\n")
+    }
+
+    /** Change the hardware gain without overwriting the original snapshot. */
+    fun setHardwareBoost(percent: Int): Pair<Boolean, String> {
+        if (detect() != Mode.ROOT) return false to "Root is required for direct ALSA mixer access"
+        val result = runRoot("$toolPath boost ${percent.coerceIn(100, 200)}")
+        lastHardwareStatus = result.second
+        return result
     }
 
     /** Restore every mixer value captured immediately before hardware boost. */
