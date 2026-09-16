@@ -20,4 +20,14 @@ int main(int argc,char**argv){if(!a.load()){fprintf(stderr,"TinyALSA unavailable
 if(!strcmp(cmd,"scan")){printf("card=0 controls=%u\n",n);for(unsigned i=0;i<n;i++){auto*c=a.get(m,i);if(cand(a.name(c))&&a.type(c)==MIXER_CTL_TYPE_INT)printf("candidate=%s values=%u range=%d..%d current=%d\n",a.name(c),a.values(c),a.min(c),a.max(c),a.getv(c,0));}a.close(m);return 0;}
 if(!strcmp(cmd,"snapshot")){for(unsigned i=0;i<n;i++){auto*c=a.get(m,i);if(!c||!cand(a.name(c))||a.type(c)!=MIXER_CTL_TYPE_INT)continue;for(unsigned v=0;v<a.values(c);v++)printf("%u|%u|%d|%s\n",i,v,a.getv(c,v),a.name(c));}a.close(m);return 0;}
 if(!strcmp(cmd,"restore")&&argc>=3){FILE*f=fopen(argv[2],"r");if(!f){perror("snapshot");a.close(m);return 4;}char line[1024];unsigned ok=0;while(fgets(line,sizeof(line),f)){unsigned id=0,v=0;int value=0;if(sscanf(line,"%u|%u|%d",&id,&v,&value)==3){auto*c=a.get(m,id);if(c&&a.type(c)==MIXER_CTL_TYPE_INT&&v<a.values(c)&&a.setv(c,v,value)==0)ok++;}}fclose(f);printf("restored=%u\n",ok);a.close(m);return 0;}
-if(!strcmp(cmd,"boost")&&argc>=3){int p=std::max(100,std::min(200,atoi(argv[2])));unsigned changed=0;for(unsigned i=0;i<n;i++){auto*c=a.get(m,i);if(!c||!cand(a.name(c))||a.type(c)!=MIXER_CTL_TYPE_INT||!a.values(c))continue;int lo=a.min(c),hi=a.max(c),cur=a.getv(c,0);if(hi<=lo)continue;int target=std::min(hi,cur+((hi-cur)*(p-100))/1000);if(a.setv(c,0,target)==0){printf("%s: %d -> %d\n",a.name(c),cur,target);changed++;}}printf("changed=%u\n",changed);a.close(m);return 0;}a.close(m);fprintf(stderr,"usage: scan|snapshot|restore FILE|boost 100..200\n");return 1;}
+if(!strcmp(cmd,"boost")&&argc>=3){int p=std::max(100,std::min(200,atoi(argv[2])));unsigned changed=0;for(unsigned i=0;i<n;i++){auto*c=a.get(m,i);if(!c||!cand(a.name(c))||a.type(c)!=MIXER_CTL_TYPE_INT||!a.values(c))continue;int lo=a.min(c),hi=a.max(c),cur=a.getv(c,0);if(hi<=lo)continue;
+// Qualcomm RX Digital Volume controls are commonly dB-scaled integer controls.
+// Use a real +6 dB endpoint at 200%, rather than an arbitrary fraction of
+// the remaining raw range. This gives approximately 2x linear amplitude
+// while avoiding the very large gain available at the raw control maximum.
+const int gainDb=(6*(p-100))/100;
+int target=std::min(hi,cur+gainDb);
+if(target<lo) target=lo;
+if(a.setv(c,0,target)==0){printf("%s: %d -> %d (+%d dB target)\n",a.name(c),cur,target,gainDb);changed++;}}
+printf("changed=%u\n",changed);a.close(m);return 0;}
+a.close(m);fprintf(stderr,"usage: scan|snapshot|restore FILE|boost 100..200\n");return 1;}
