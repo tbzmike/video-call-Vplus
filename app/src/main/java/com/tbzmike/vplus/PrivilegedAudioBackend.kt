@@ -56,14 +56,25 @@ class PrivilegedAudioBackend(private val context: Context) {
         val snapshot = runRoot("$toolPath snapshot > ${shellQuote(snapshotFile)}")
         if (!snapshot.first) return false to "Hardware snapshot failed: ${snapshot.second}"
 
-        val hardware = setHardwareBoost(p)
+        val hardware = setHardwareBoost(p, fromSnapshot = true)
         return hardware.first to listOf(voice.second, media.second, hardware.second).filter { it.isNotBlank() }.joinToString("\n")
     }
 
-    /** Change the hardware gain without overwriting the original snapshot. */
-    fun setHardwareBoost(percent: Int): Pair<Boolean, String> {
+    /** Restore to the saved baseline before applying a new hardware target. */
+    fun setHardwareBoost(percent: Int): Pair<Boolean, String> = setHardwareBoost(percent, fromSnapshot = false)
+
+    private fun setHardwareBoost(percent: Int, fromSnapshot: Boolean): Pair<Boolean, String> {
         if (detect() != Mode.ROOT) return false to "Root is required for direct ALSA mixer access"
-        val result = runRoot("$toolPath boost ${percent.coerceIn(100, 200)}")
+        if (!fromSnapshot) {
+            val restored = runRoot("$toolPath restore ${shellQuote(snapshotFile)}")
+            if (!restored.first) return restored
+        }
+        val p = percent.coerceIn(100, 200)
+        val result = if (p == 100) {
+            true to "Hardware mixer restored to 100% baseline"
+        } else {
+            runRoot("$toolPath boost $p")
+        }
         lastHardwareStatus = result.second
         return result
     }
