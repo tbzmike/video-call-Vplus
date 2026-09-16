@@ -23,9 +23,11 @@ class PrivilegedAudioBackend {
 
     fun isAvailable(): Boolean = detect() != Mode.NONE
 
-    /** Raise the media stream to the platform maximum before DSP amplification. */
-    fun maximizeMediaVolume(): Boolean {
-        return runPrivileged("cmd media_session volume --stream 3 --set 15").first
+    /** Raise both common voice-call and media streams to their platform maximum. */
+    fun maximizeCallVolume(): Boolean {
+        val voice = runPrivileged("cmd media_session volume --stream 0 --set 100").first
+        val media = runPrivileged("cmd media_session volume --stream 3 --set 100").first
+        return voice || media
     }
 
     fun runPrivileged(command: String): Pair<Boolean, String> {
