@@ -11,8 +11,8 @@ android {
         applicationId = "com.tbzmike.vplus"
         minSdk = 23
         targetSdk = 37
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = 3
+        versionName = "1.0.2"
     }
 
     buildFeatures {
@@ -36,6 +36,6 @@ dependencies {
     implementation("androidx.compose.ui:ui-tooling-preview")
     debugImplementation("androidx.compose.ui:ui-tooling")
 
-    implementation("dev.rikka.shizuku:api:13.1.5")
-    implementation("dev.rikka.shizuku:provider:13.1.5")
+    implementation("dev.rikka.shizuku:api:12.2.0")
+    implementation("dev.rikka.shizuku:provider:12.2.0")
 }
