@@ -109,16 +109,12 @@ Java_com_tbzmike_vplus_PrivilegedAudioBackend_nativeSetSafeBoost(JNIEnv* env, jo
         const int min = api.mixer_ctl_get_range_min(c);
         const int max = api.mixer_ctl_get_range_max(c);
         if (max <= min) continue;
-        // Hardware mixer units are device-specific. Treat 100% as the current
-        // value and use only 10% of the remaining range at the 200% endpoint.
-        // This is deliberately conservative until the exact control semantics
-        // are confirmed on the device; never jump straight to the raw maximum.
         const int current = api.mixer_ctl_get_value(c, 0);
-        const int headroom = max - current;
-        const int target = std::min(max, current + (headroom * (p - 100)) / 1000);
+        const int gainDb = (6 * (p - 100)) / 100;
+        const int target = std::max(min, std::min(max, current + gainDb));
         if (api.mixer_ctl_set_value(c, 0, target) == 0) {
             ++changed;
-            out << raw << ":" << current << "->" << target << "\n";
+            out << raw << ":" << current << "->" << target << " (+" << gainDb << " dB target)\n";
         }
     }
     out << "changed=" << changed;
@@ -128,10 +124,6 @@ Java_com_tbzmike_vplus_PrivilegedAudioBackend_nativeSetSafeBoost(JNIEnv* env, jo
 
 extern "C" JNIEXPORT jstring JNICALL
 Java_com_tbzmike_vplus_PrivilegedAudioBackend_nativeRestoreSnapshot(JNIEnv* env, jobject, jstring snapshot) {
-    // Restoration is intentionally kept out of the first native revision.
-    // The Kotlin layer records a scan before enabling hardware boost, and the
-    // exact control/value snapshot will be wired once the device controls are
-    // confirmed. Returning a truthful status is safer than guessing controls.
     (void)snapshot;
     return env->NewStringUTF("restore-not-yet-applied");
 }
